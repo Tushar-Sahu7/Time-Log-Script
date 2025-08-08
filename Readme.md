@@ -44,7 +44,7 @@ Setting up this automation is a simple 3-step process.
 
 1. Create a new Google Sheet.
 2. Name your sheets according to a `"Month YY"` format (e.g., **"August 25"**, **"September 25"**). This is crucial for the script's validation logic.
-Set up your header rows. The script requires a specific structure. You can use Row 1 for a title (e.g., the Year in cell A1), leave Row 2 blank for spacing, and set up Row 3 as your main header row like this:
+   Set up your header rows. The script requires a specific structure. You can use Row 1 for a title (e.g., the Year in cell A1), leave Row 2 blank for spacing, and set up Row 3 as your main header row like this:
 
 Column A (1): Date (dd/mm/yyyy)
 
@@ -78,7 +78,7 @@ Column O (15): Day (text)
 
 Column P (16): Links (text)
 
-Column Q (17): EventId (tet)
+Column Q (17): EventId (text)
 
 #### **Step 2: Add the Script**
 
