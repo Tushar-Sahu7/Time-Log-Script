@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    let allDays = [];
+
+    async function fetchDays() {
+      await google.script.run.withSuccessHandler((days) => {
+        allDays = days;
+        renderStartDropdown(days);
+      }).getDaysInActiveSheetMonth();
+    }
+
+    function renderStartDropdown(days) {
+      const startSelect = document.getElementById("startDate");
+      startSelect.innerHTML = "";
+
+      days.forEach(day => {
+        const opt = new Option(day.display, day.value);
+        startSelect.add(opt);
+      });
+
+      document.getElementById("endDate").disabled = true;
+      document.getElementById("endDate").innerHTML = "";
+    }
+
+    function renderEndDropdown(startDateStr) {
+      const endSelect = document.getElementById("endDate");
+      endSelect.innerHTML = "";
+
+      const startDate = new Date(startDateStr);
+
+      const filteredDays = allDays.filter(day => {
+        const thisDate = new Date(day.value);
+        return thisDate > startDate;
+      });
+
+      filteredDays.forEach(day => {
+        const opt = new Option(day.display, day.value);
+        endSelect.add(opt);
+      });
+
+      endSelect.disabled = false;
+    }
+
+    function toggleDateRange() {
+      const isRange = document.getElementById("isRange").checked;
+      const endContainer = document.getElementById("secondDateContainer");
+      endContainer.style.display = isRange ? "block" : "none";
+
+      if (isRange) {
+        const currentStartDate = document.getElementById("startDate").value;
+        if (currentStartDate) {
+          renderEndDropdown(currentStartDate);
+        }
+      }
+    }
+
+    function submitDate() {
+      const startDate = document.getElementById("startDate").value;
+      const isRange = document.getElementById("isRange").checked;
+      const endDate = document.getElementById("endDate").value;
+
+      if (!startDate || (isRange && !endDate)) {
+        alert("⚠️ Please select the required date(s).");
+        return;
+      }
+
+      if (!isRange) {
+        google.script.run.processSelectedDate(startDate);
+      } else {
+        google.script.run.processSelectedDateRange(startDate, endDate);
+      }
+
+      google.script.host.close();
+    }
+
+    function cancel() {
+      google.script.host.close();
+    }
+
+    window.onload = () => {
+      fetchDays();
+      document.getElementById("startDate").addEventListener("change", function () {
+        renderEndDropdown(this.value);
+      });
+    };
+  </script>
+
+</head>
+
+<body class="bg-white p-6 rounded-lg w-full space-y-4">
+  <div class="flex items-center space-x-2">
+    <input type="checkbox" id="isRange" onclick="toggleDateRange()"
+      class="h-4 w-4 text-blue-600 border-gray-300 rounded">
+    <label for="isRange" class="text-sm font-medium text-gray-700">Sync date range</label>
+  </div>
+
+  <div>
+    <label for="startDate" class="block px-3 mb-1 text-sm font-medium text-gray-700">Start Date</label>
+    <select id="startDate"
+      class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"></select>
+  </div>
+
+  <div id="secondDateContainer" style="display: none;">
+    <label for="endDate" class="block px-3 mb-1 text-sm font-medium text-gray-700">End Date</label>
+    <select id="endDate"
+      class="w-full px-3 py-2 mborder border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"></select>
+  </div>
+
+  <div class="flex justify-between space-x-2 pt-2">
+    <button onclick="cancel()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Cancel</button>
+    <button onclick="submitDate()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Sync</button>
+  </div>
+</body>
+
+</html>
