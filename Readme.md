@@ -1,4 +1,4 @@
-# Google Calendar to Sheets: An Intelligent Time Log Automation
+# Time Log Script: Google Calendar to Sheets -> An Intelligent Time Log Automatio
 
 This Google Apps Script provides a powerful, precise, and user-friendly way to sync your Google Calendar events to a Google Sheet for advanced time tracking and analysis. It's more than just a simple sync; it's an intelligent automation designed to be both fast and careful with your data.
 
