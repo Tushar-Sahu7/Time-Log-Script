@@ -115,3 +115,43 @@ const CALENDAR_MANAGED_COLS = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17];
 - These numbers are **1-based** (Column A = 1, B = 2, etc.).
 - If you add a new column that should be synced from the calendar, **add its number to this array**.
 - If you have a column for manual notes that you **never** want the script to touch, **make sure its number is NOT in this list.**
+
+### **How to Sync a Different Calendar**
+
+By default, the script syncs with your primary Google Calendar. If you want to sync events from a different calendar (like a shared work calendar), you just need to make one small change.
+
+#### **Step 1: Find Your Calendar ID**
+
+Every Google Calendar has a unique ID, which looks like an email address.
+
+1. Open Google Calendar on your computer.
+2. On the left, find the calendar you want to sync, click the three dots (⋮), and select **"Settings and sharing"**.
+3. Scroll down to the **"Integrate calendar"** section.
+4. Copy the **Calendar ID** value. It will look something like `ab123xyz...@group.calendar.google.com`.
+
+#### **Step 2: Edit the Script**
+
+1. Go back to the Apps Script editor (`Extensions > Apps Script`).
+2. Find the `_fetchAndProcessEvents` function.
+3. Locate this line of code:
+
+   ```
+   // This is the line to change
+   const calendarId = CalendarApp.getDefaultCalendar().getId();
+   ```
+
+4. Replace `CalendarApp.getDefaultCalendar().getId()` with your Calendar ID in quotes.
+
+   **Before:**
+
+   ```
+   const calendarId = CalendarApp.getDefaultCalendar().getId();
+   ```
+
+   **After:**
+
+   ```
+   const calendarId = "ab123xyz...@group.calendar.google.com"; // <-- Paste your Calendar ID here
+   ```
+
+5. Save the script. That's it! From now on, the script will pull all events from the calendar you specified.
