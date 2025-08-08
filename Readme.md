@@ -47,21 +47,37 @@ Setting up this automation is a simple 3-step process.
 Set up your header rows. The script requires a specific structure. You can use Row 1 for a title (e.g., the Year in cell A1), leave Row 2 blank for spacing, and set up Row 3 as your main header row like this:
 
 Column A (1): Date (dd/mm/yyyy)
+
 Column B (2): Start Time (hh:mm)
+
 Column C (3): End Time (hh:mm)
+
 Column D (4): Activity (text)
+
 Column E (5): Duration (hh:mm)
+
 Column F (6): Calendar (text for manual entry)
+
 Column G (7): Urgency (text for manual entry)
+
 Column H (8): Utility (text for manual entry)
+
 Column I (9): Axis (text for manual entry)
+
 Column J (10): Planned (checkbox for manual entry)
+
 Column K (11): Notes (text)
+
 Column L (12): Week (number)
+
 Column M (13): Month (text)
+
 Column N (14): Year (number)
+
 Column O (15): Day (text)
+
 Column P (16): Links (text)
+
 Column Q (17): EventId (tet)
 
 #### **Step 2: Add the Script**
