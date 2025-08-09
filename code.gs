@@ -38,11 +38,9 @@ function _fetchAndProcessEvents(startDate, endDate) {
   const calendarId = CalendarApp.getDefaultCalendar().getId();
   let events;
 
-  // Set the time of startDate to the beginning of the day for an accurate range
   const effectiveStartDate = new Date(startDate);
   effectiveStartDate.setHours(0, 0, 0, 0);
 
-  // Set the time of endDate to the end of the day for an accurate range
   const effectiveEndDate = new Date(endDate);
   effectiveEndDate.setHours(23, 59, 59, 999);
 
@@ -53,6 +51,8 @@ function _fetchAndProcessEvents(startDate, endDate) {
         timeMax: effectiveEndDate.toISOString(),
         singleEvents: true,
         orderBy: "startTime",
+        // --- IMPLEMENTED: Selective Field Fetching for better performance ---
+        fields: "items(id,summary,description,start,end,location,hangoutLink)",
       }).items || [];
     events = eventList.filter((event) => event.start.dateTime);
   } catch (err) {
@@ -74,9 +74,6 @@ function _fetchAndProcessEvents(startDate, endDate) {
       const segmentEnd = new Date(Math.min(dayEnd, originalEnd));
       if (loopStart >= segmentEnd) break;
 
-      // *** FIX IMPLEMENTED HERE ***
-      // This check ensures that only segments starting *within* the requested
-      // date range are processed and returned.
       if (loopStart >= effectiveStartDate && loopStart <= effectiveEndDate) {
         const row = _formatEventSegment(event, loopStart, segmentEnd, tz);
         allRows.push(row);
@@ -90,11 +87,6 @@ function _fetchAndProcessEvents(startDate, endDate) {
 
 /**
  * Helper to format a single event segment into a row array.
- * @param {Object} event The original calendar event.
- * @param {Date} start The start time of the segment.
- * @param {Date} end The end time of the segment.
- * @param {string} tz The script's timezone.
- * @returns {Array<Object>} A formatted row array.
  */
 function _formatEventSegment(event, start, end, tz) {
   const durationMs = end.getTime() - start.getTime();
@@ -131,12 +123,10 @@ function _formatEventSegment(event, start, end, tz) {
 // ===================================
 
 /**
- * High-precision, high-speed refresh. Fetches all data in a single batch,
- * intelligently compares it, and preserves manually entered data.
+ * High-precision, high-speed refresh with robust locking and error handling.
  */
 function refreshTimeLog() {
   const lock = LockService.getScriptLock();
-
   if (lock.tryLock(0)) {
     try {
       const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -149,7 +139,7 @@ function refreshTimeLog() {
         getActiveSheetMonthYear();
       } catch (err) {
         ui.alert(err.message);
-        return;
+        return; // Stop execution if validation fails
       }
 
       const lastRow = sheet.getLastRow();
@@ -160,7 +150,7 @@ function refreshTimeLog() {
 
       ui.alert("⏳ Refreshing data... Please wait.");
 
-      // --- Step 1: Read existing data & create a detailed map ---
+      // --- The entire refresh logic is now safely wrapped ---
       const dataRange = sheet.getRange(
         CONFIG.HEADER_ROWS + 1,
         1,
@@ -180,16 +170,13 @@ function refreshTimeLog() {
           uniqueDates.add(dateString);
           const standardizedRow = [...row];
           standardizedRow[0] = Utilities.formatDate(row[0], tz, "yyyy-MM-dd");
-          // Check if start/end time columns are also dates before formatting
           if (row[1] instanceof Date)
             standardizedRow[1] = Utilities.formatDate(row[1], tz, "HH:mm");
           if (row[2] instanceof Date)
             standardizedRow[2] = Utilities.formatDate(row[2], tz, "HH:mm");
-
           const contentSnapshot = CALENDAR_MANAGED_COLS.map(
             (col) => standardizedRow[col - 1]
           ).join("|");
-
           existingDataMap.set(key, {
             rowNum: index + CONFIG.HEADER_ROWS + 1,
             snapshot: contentSnapshot,
@@ -202,14 +189,32 @@ function refreshTimeLog() {
         return;
       }
 
-      // --- Step 2: Fetch all fresh data in a SINGLE BATCH CALL ---
       const dateArray = [...uniqueDates].map((ds) => new Date(ds));
       const minDate = new Date(Math.min(...dateArray));
       const maxDate = new Date(Math.max(...dateArray));
-
       const freshEventRows = _fetchAndProcessEvents(minDate, maxDate);
 
-      // --- Step 3: Intelligently find what's new, modified, or deleted ---
+      // --- IMPLEMENTED: Safeguard against accidental mass deletion ---
+      const existingEventCount = existingDataMap.size;
+      const freshEventCount = freshEventRows.length;
+      const DELETION_THRESHOLD = 0.8; // Cancels if refresh would delete over 80% of data.
+
+      if (
+        existingEventCount > 10 &&
+        freshEventCount < existingEventCount * (1 - DELETION_THRESHOLD)
+      ) {
+        ui.alert(
+          `🛑 Refresh Canceled: Safety Precaution\n\n` +
+            `The script detected that this refresh would delete over ${
+              DELETION_THRESHOLD * 100
+            }% of your data ` +
+            `(${existingEventCount} rows -> ${freshEventCount} rows).\n\n` +
+            `This can happen if the Calendar API has a temporary issue. Please check your calendar and try again.`
+        );
+        return; // Stop the function to prevent data loss.
+      }
+      // --- END OF SAFEGUARD ---
+
       const rowsToAdd = [];
       const rowsToUpdate = [];
       const freshKeys = new Set();
@@ -218,14 +223,11 @@ function refreshTimeLog() {
         const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
           row[CONFIG.DATE_COLUMN_INDEX]
         }`;
-        // This check is now implicitly handled by the improved _fetchAndProcessEvents
         freshKeys.add(key);
-
         const newSnapshot = CALENDAR_MANAGED_COLS.map(
           (col) => row[col - 1]
         ).join("|");
         const existingEvent = existingDataMap.get(key);
-
         if (existingEvent) {
           if (existingEvent.snapshot !== newSnapshot) {
             rowsToUpdate.push({
@@ -234,7 +236,6 @@ function refreshTimeLog() {
             });
           }
         } else {
-          // Only add if the event's date was one of the unique dates originally in the sheet
           if (uniqueDates.has(row[CONFIG.DATE_COLUMN_INDEX])) {
             rowsToAdd.push(row);
           }
@@ -245,7 +246,6 @@ function refreshTimeLog() {
         .filter((key) => !freshKeys.has(key))
         .map((key) => existingDataMap.get(key).rowNum);
 
-      // --- Step 4: Apply all changes efficiently ---
       for (const update of rowsToUpdate) {
         for (const colIndex of CALENDAR_MANAGED_COLS) {
           sheet
@@ -269,22 +269,18 @@ function refreshTimeLog() {
         .sort((a, b) => b - a)
         .forEach((rowNum) => sheet.deleteRow(rowNum));
 
-      // --- Final Report ---
       ui.alert(
         `✅ Refresh Complete!\n\n- Added: ${rowsToAdd.length}\n- Modified: ${rowsToUpdate.length}\n- Deleted: ${rowsToDelete.length}`
       );
     } catch (e) {
-      // This will now catch ANY unexpected error during the refresh process.
       SpreadsheetApp.getUi().alert(
         "❌ An unexpected error occurred during refresh. Please try again.\n\nError: " +
           e.message
       );
     } finally {
-      // ALWAYS release the lock when done.
       lock.releaseLock();
     }
   } else {
-    // If the lock was busy, immediately tell the user.
     SpreadsheetApp.getUi().alert(
       "⚠️ Another operation is already in progress. Please wait for it to finish and then try again."
     );
@@ -292,14 +288,10 @@ function refreshTimeLog() {
 }
 
 /**
- * The single, unified function to sync new events for a given date or date range.
- * It provides specific UI feedback based on whether a single day or a range is synced.
- * @param {string} startStr - The start date in "yyyy-MM-dd" format.
- * @param {string} endStr - The end date in "yyyy-MM-dd" format.
+ * Unified sync function with robust locking and error handling.
  */
 function processSelectedDateRange(startStr, endStr) {
   const lock = LockService.getScriptLock();
-
   if (lock.tryLock(0)) {
     try {
       const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -309,7 +301,6 @@ function processSelectedDateRange(startStr, endStr) {
       const endDate = new Date(endStr);
       const isSingleDay = startStr === endStr;
 
-      // 1. Validate that the date(s) are within the active sheet's month
       try {
         const activeMonthYear = getActiveSheetMonthYear();
         const startMatches =
@@ -318,7 +309,6 @@ function processSelectedDateRange(startStr, endStr) {
         const endMatches =
           endDate.getMonth() === activeMonthYear.month &&
           endDate.getFullYear() === activeMonthYear.year;
-
         if (!startMatches || !endMatches) {
           const displayDate = Utilities.formatDate(
             startDate,
@@ -336,7 +326,6 @@ function processSelectedDateRange(startStr, endStr) {
         return;
       }
 
-      // 2. Get existing event keys to avoid duplicates
       const existingKeys = new Set(
         sheet
           .getDataRange()
@@ -355,10 +344,7 @@ function processSelectedDateRange(startStr, endStr) {
           .filter(Boolean)
       );
 
-      // 3. Fetch events for the date or range
       const allFetchedRows = _fetchAndProcessEvents(startDate, endDate);
-
-      // 4. Filter for only new events
       const newRows = allFetchedRows.filter((row) => {
         const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
           row[CONFIG.DATE_COLUMN_INDEX]
@@ -366,7 +352,6 @@ function processSelectedDateRange(startStr, endStr) {
         return !existingKeys.has(key);
       });
 
-      // 5. Append new rows
       if (newRows.length > 0) {
         sheet
           .getRange(
@@ -378,7 +363,6 @@ function processSelectedDateRange(startStr, endStr) {
           .setValues(newRows);
       }
 
-      // 6. Show a specific, intelligent UI alert
       let summaryMessage = "";
       if (isSingleDay) {
         const displayDate = Utilities.formatDate(startDate, tz, "dd MMM yyyy");
@@ -398,20 +382,16 @@ function processSelectedDateRange(startStr, endStr) {
             ? `Total new events synced: ${newRows.length}`
             : "All events in this period were already synced.";
       }
-
       ui.alert(summaryMessage);
     } catch (e) {
-      // This will now catch ANY unexpected error during the sync process.
       SpreadsheetApp.getUi().alert(
         "❌ An unexpected error occurred during sync. Please try again.\n\nError: " +
           e.message
       );
     } finally {
-      // ALWAYS release the lock when done.
       lock.releaseLock();
     }
   } else {
-    // If the lock was busy, immediately tell the user.
     SpreadsheetApp.getUi().alert(
       "⚠️ Another operation is already in progress. Please wait for it to finish and then try again."
     );
