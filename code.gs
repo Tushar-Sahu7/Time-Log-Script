@@ -135,137 +135,160 @@ function _formatEventSegment(event, start, end, tz) {
  * intelligently compares it, and preserves manually entered data.
  */
 function refreshTimeLog() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const ui = SpreadsheetApp.getUi();
-  const tz = Session.getScriptTimeZone();
+  const lock = LockService.getScriptLock();
 
-  const CALENDAR_MANAGED_COLS = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17];
+  if (lock.tryLock(0)) {
+    try {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+      const ui = SpreadsheetApp.getUi();
+      const tz = Session.getScriptTimeZone();
 
-  try {
-    getActiveSheetMonthYear();
-  } catch (err) {
-    ui.alert(err.message);
-    return;
-  }
+      const CALENDAR_MANAGED_COLS = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17];
 
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= CONFIG.HEADER_ROWS) {
-    ui.alert("⛔ No data to refresh.");
-    return;
-  }
-
-  ui.alert("⏳ Refreshing data... Please wait.");
-
-  // --- Step 1: Read existing data & create a detailed map ---
-  const dataRange = sheet.getRange(
-    CONFIG.HEADER_ROWS + 1,
-    1,
-    lastRow - CONFIG.HEADER_ROWS,
-    sheet.getLastColumn()
-  );
-  const dataRowsAndCols = dataRange.getValues();
-  const existingDataMap = new Map();
-  const uniqueDates = new Set();
-
-  dataRowsAndCols.forEach((row, index) => {
-    const eventId = row[CONFIG.ID_COLUMN_INDEX];
-    const eventDate = row[CONFIG.DATE_COLUMN_INDEX];
-    if (eventId && eventDate instanceof Date) {
-      const dateString = Utilities.formatDate(eventDate, tz, "yyyy-MM-dd");
-      const key = `${eventId}_${dateString}`;
-      uniqueDates.add(dateString);
-      const standardizedRow = [...row];
-      standardizedRow[0] = Utilities.formatDate(row[0], tz, "yyyy-MM-dd");
-      // Check if start/end time columns are also dates before formatting
-      if (row[1] instanceof Date)
-        standardizedRow[1] = Utilities.formatDate(row[1], tz, "HH:mm");
-      if (row[2] instanceof Date)
-        standardizedRow[2] = Utilities.formatDate(row[2], tz, "HH:mm");
-
-      const contentSnapshot = CALENDAR_MANAGED_COLS.map(
-        (col) => standardizedRow[col - 1]
-      ).join("|");
-
-      existingDataMap.set(key, {
-        rowNum: index + CONFIG.HEADER_ROWS + 1,
-        snapshot: contentSnapshot,
-      });
-    }
-  });
-
-  if (uniqueDates.size === 0) {
-    ui.alert("No valid dates found to refresh.");
-    return;
-  }
-
-  // --- Step 2: Fetch all fresh data in a SINGLE BATCH CALL ---
-  const dateArray = [...uniqueDates].map((ds) => new Date(ds));
-  const minDate = new Date(Math.min(...dateArray));
-  const maxDate = new Date(Math.max(...dateArray));
-
-  const freshEventRows = _fetchAndProcessEvents(minDate, maxDate);
-
-  // --- Step 3: Intelligently find what's new, modified, or deleted ---
-  const rowsToAdd = [];
-  const rowsToUpdate = [];
-  const freshKeys = new Set();
-
-  for (const row of freshEventRows) {
-    const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
-      row[CONFIG.DATE_COLUMN_INDEX]
-    }`;
-    // This check is now implicitly handled by the improved _fetchAndProcessEvents
-    freshKeys.add(key);
-
-    const newSnapshot = CALENDAR_MANAGED_COLS.map((col) => row[col - 1]).join(
-      "|"
-    );
-    const existingEvent = existingDataMap.get(key);
-
-    if (existingEvent) {
-      if (existingEvent.snapshot !== newSnapshot) {
-        rowsToUpdate.push({ rowNum: existingEvent.rowNum, newRowData: row });
+      try {
+        getActiveSheetMonthYear();
+      } catch (err) {
+        ui.alert(err.message);
+        return;
       }
-    } else {
-      // Only add if the event's date was one of the unique dates originally in the sheet
-      if (uniqueDates.has(row[CONFIG.DATE_COLUMN_INDEX])) {
-        rowsToAdd.push(row);
+
+      const lastRow = sheet.getLastRow();
+      if (lastRow <= CONFIG.HEADER_ROWS) {
+        ui.alert("⛔ No data to refresh.");
+        return;
       }
-    }
-  }
 
-  const rowsToDelete = [...existingDataMap.keys()]
-    .filter((key) => !freshKeys.has(key))
-    .map((key) => existingDataMap.get(key).rowNum);
+      ui.alert("⏳ Refreshing data... Please wait.");
 
-  // --- Step 4: Apply all changes efficiently ---
-  for (const update of rowsToUpdate) {
-    for (const colIndex of CALENDAR_MANAGED_COLS) {
-      sheet
-        .getRange(update.rowNum, colIndex)
-        .setValue(update.newRowData[colIndex - 1]);
-    }
-  }
-
-  if (rowsToAdd.length > 0) {
-    sheet
-      .getRange(
-        sheet.getLastRow() + 1,
+      // --- Step 1: Read existing data & create a detailed map ---
+      const dataRange = sheet.getRange(
+        CONFIG.HEADER_ROWS + 1,
         1,
-        rowsToAdd.length,
-        rowsToAdd[0].length
-      )
-      .setValues(rowsToAdd);
+        lastRow - CONFIG.HEADER_ROWS,
+        sheet.getLastColumn()
+      );
+      const dataRowsAndCols = dataRange.getValues();
+      const existingDataMap = new Map();
+      const uniqueDates = new Set();
+
+      dataRowsAndCols.forEach((row, index) => {
+        const eventId = row[CONFIG.ID_COLUMN_INDEX];
+        const eventDate = row[CONFIG.DATE_COLUMN_INDEX];
+        if (eventId && eventDate instanceof Date) {
+          const dateString = Utilities.formatDate(eventDate, tz, "yyyy-MM-dd");
+          const key = `${eventId}_${dateString}`;
+          uniqueDates.add(dateString);
+          const standardizedRow = [...row];
+          standardizedRow[0] = Utilities.formatDate(row[0], tz, "yyyy-MM-dd");
+          // Check if start/end time columns are also dates before formatting
+          if (row[1] instanceof Date)
+            standardizedRow[1] = Utilities.formatDate(row[1], tz, "HH:mm");
+          if (row[2] instanceof Date)
+            standardizedRow[2] = Utilities.formatDate(row[2], tz, "HH:mm");
+
+          const contentSnapshot = CALENDAR_MANAGED_COLS.map(
+            (col) => standardizedRow[col - 1]
+          ).join("|");
+
+          existingDataMap.set(key, {
+            rowNum: index + CONFIG.HEADER_ROWS + 1,
+            snapshot: contentSnapshot,
+          });
+        }
+      });
+
+      if (uniqueDates.size === 0) {
+        ui.alert("No valid dates found to refresh.");
+        return;
+      }
+
+      // --- Step 2: Fetch all fresh data in a SINGLE BATCH CALL ---
+      const dateArray = [...uniqueDates].map((ds) => new Date(ds));
+      const minDate = new Date(Math.min(...dateArray));
+      const maxDate = new Date(Math.max(...dateArray));
+
+      const freshEventRows = _fetchAndProcessEvents(minDate, maxDate);
+
+      // --- Step 3: Intelligently find what's new, modified, or deleted ---
+      const rowsToAdd = [];
+      const rowsToUpdate = [];
+      const freshKeys = new Set();
+
+      for (const row of freshEventRows) {
+        const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
+          row[CONFIG.DATE_COLUMN_INDEX]
+        }`;
+        // This check is now implicitly handled by the improved _fetchAndProcessEvents
+        freshKeys.add(key);
+
+        const newSnapshot = CALENDAR_MANAGED_COLS.map(
+          (col) => row[col - 1]
+        ).join("|");
+        const existingEvent = existingDataMap.get(key);
+
+        if (existingEvent) {
+          if (existingEvent.snapshot !== newSnapshot) {
+            rowsToUpdate.push({
+              rowNum: existingEvent.rowNum,
+              newRowData: row,
+            });
+          }
+        } else {
+          // Only add if the event's date was one of the unique dates originally in the sheet
+          if (uniqueDates.has(row[CONFIG.DATE_COLUMN_INDEX])) {
+            rowsToAdd.push(row);
+          }
+        }
+      }
+
+      const rowsToDelete = [...existingDataMap.keys()]
+        .filter((key) => !freshKeys.has(key))
+        .map((key) => existingDataMap.get(key).rowNum);
+
+      // --- Step 4: Apply all changes efficiently ---
+      for (const update of rowsToUpdate) {
+        for (const colIndex of CALENDAR_MANAGED_COLS) {
+          sheet
+            .getRange(update.rowNum, colIndex)
+            .setValue(update.newRowData[colIndex - 1]);
+        }
+      }
+
+      if (rowsToAdd.length > 0) {
+        sheet
+          .getRange(
+            sheet.getLastRow() + 1,
+            1,
+            rowsToAdd.length,
+            rowsToAdd[0].length
+          )
+          .setValues(rowsToAdd);
+      }
+
+      rowsToDelete
+        .sort((a, b) => b - a)
+        .forEach((rowNum) => sheet.deleteRow(rowNum));
+
+      // --- Final Report ---
+      ui.alert(
+        `✅ Refresh Complete!\n\n- Added: ${rowsToAdd.length}\n- Modified: ${rowsToUpdate.length}\n- Deleted: ${rowsToDelete.length}`
+      );
+    } catch (e) {
+      // This will now catch ANY unexpected error during the refresh process.
+      SpreadsheetApp.getUi().alert(
+        "❌ An unexpected error occurred during refresh. Please try again.\n\nError: " +
+          e.message
+      );
+    } finally {
+      // ALWAYS release the lock when done.
+      lock.releaseLock();
+    }
+  } else {
+    // If the lock was busy, immediately tell the user.
+    SpreadsheetApp.getUi().alert(
+      "⚠️ Another operation is already in progress. Please wait for it to finish and then try again."
+    );
   }
-
-  rowsToDelete
-    .sort((a, b) => b - a)
-    .forEach((rowNum) => sheet.deleteRow(rowNum));
-
-  // --- Final Report ---
-  ui.alert(
-    `✅ Refresh Complete!\n\n- Added: ${rowsToAdd.length}\n- Modified: ${rowsToUpdate.length}\n- Deleted: ${rowsToDelete.length}`
-  );
 }
 
 /**
@@ -275,94 +298,124 @@ function refreshTimeLog() {
  * @param {string} endStr - The end date in "yyyy-MM-dd" format.
  */
 function processSelectedDateRange(startStr, endStr) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const ui = SpreadsheetApp.getUi();
-  const tz = Session.getScriptTimeZone();
-  const startDate = new Date(startStr);
-  const endDate = new Date(endStr);
-  const isSingleDay = startStr === endStr;
+  const lock = LockService.getScriptLock();
 
-  // 1. Validate that the date(s) are within the active sheet's month
-  try {
-    const activeMonthYear = getActiveSheetMonthYear();
-    const startMatches =
-      startDate.getMonth() === activeMonthYear.month &&
-      startDate.getFullYear() === activeMonthYear.year;
-    const endMatches =
-      endDate.getMonth() === activeMonthYear.month &&
-      endDate.getFullYear() === activeMonthYear.year;
+  if (lock.tryLock(0)) {
+    try {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+      const ui = SpreadsheetApp.getUi();
+      const tz = Session.getScriptTimeZone();
+      const startDate = new Date(startStr);
+      const endDate = new Date(endStr);
+      const isSingleDay = startStr === endStr;
 
-    if (!startMatches || !endMatches) {
-      const displayDate = Utilities.formatDate(startDate, tz, "dd MMM yyyy");
-      const errorMsg = isSingleDay
-        ? `❌ Sync date (${displayDate}) does not match the active sheet (${sheet.getName()}).`
-        : `❌ The date range must be within the month of the active sheet (${sheet.getName()}).`;
-      ui.alert(errorMsg);
-      return;
-    }
-  } catch (err) {
-    ui.alert(err.message);
-    return;
-  }
+      // 1. Validate that the date(s) are within the active sheet's month
+      try {
+        const activeMonthYear = getActiveSheetMonthYear();
+        const startMatches =
+          startDate.getMonth() === activeMonthYear.month &&
+          startDate.getFullYear() === activeMonthYear.year;
+        const endMatches =
+          endDate.getMonth() === activeMonthYear.month &&
+          endDate.getFullYear() === activeMonthYear.year;
 
-  // 2. Get existing event keys to avoid duplicates
-  const existingKeys = new Set(
-    sheet
-      .getDataRange()
-      .getValues()
-      .slice(CONFIG.HEADER_ROWS)
-      .map((r) =>
-        r[CONFIG.ID_COLUMN_INDEX] && r[CONFIG.DATE_COLUMN_INDEX] instanceof Date
-          ? `${r[CONFIG.ID_COLUMN_INDEX]}_${Utilities.formatDate(
-              r[CONFIG.DATE_COLUMN_INDEX],
-              tz,
-              "yyyy-MM-dd"
-            )}`
-          : null
-      )
-      .filter(Boolean)
-  );
+        if (!startMatches || !endMatches) {
+          const displayDate = Utilities.formatDate(
+            startDate,
+            tz,
+            "dd MMM yyyy"
+          );
+          const errorMsg = isSingleDay
+            ? `❌ Sync date (${displayDate}) does not match the active sheet (${sheet.getName()}).`
+            : `❌ The date range must be within the month of the active sheet (${sheet.getName()}).`;
+          ui.alert(errorMsg);
+          return;
+        }
+      } catch (err) {
+        ui.alert(err.message);
+        return;
+      }
 
-  // 3. Fetch events for the date or range
-  const allFetchedRows = _fetchAndProcessEvents(startDate, endDate);
+      // 2. Get existing event keys to avoid duplicates
+      const existingKeys = new Set(
+        sheet
+          .getDataRange()
+          .getValues()
+          .slice(CONFIG.HEADER_ROWS)
+          .map((r) =>
+            r[CONFIG.ID_COLUMN_INDEX] &&
+            r[CONFIG.DATE_COLUMN_INDEX] instanceof Date
+              ? `${r[CONFIG.ID_COLUMN_INDEX]}_${Utilities.formatDate(
+                  r[CONFIG.DATE_COLUMN_INDEX],
+                  tz,
+                  "yyyy-MM-dd"
+                )}`
+              : null
+          )
+          .filter(Boolean)
+      );
 
-  // 4. Filter for only new events
-  const newRows = allFetchedRows.filter((row) => {
-    const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
-      row[CONFIG.DATE_COLUMN_INDEX]
-    }`;
-    return !existingKeys.has(key);
-  });
+      // 3. Fetch events for the date or range
+      const allFetchedRows = _fetchAndProcessEvents(startDate, endDate);
 
-  // 5. Append new rows
-  if (newRows.length > 0) {
-    sheet
-      .getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length)
-      .setValues(newRows);
-  }
+      // 4. Filter for only new events
+      const newRows = allFetchedRows.filter((row) => {
+        const key = `${row[CONFIG.ID_COLUMN_INDEX]}_${
+          row[CONFIG.DATE_COLUMN_INDEX]
+        }`;
+        return !existingKeys.has(key);
+      });
 
-  // 6. Show a specific, intelligent UI alert
-  let summaryMessage = "";
-  if (isSingleDay) {
-    const displayDate = Utilities.formatDate(startDate, tz, "dd MMM yyyy");
-    if (newRows.length > 0) {
-      summaryMessage = `✅ Synced ${newRows.length} new event(s) for ${displayDate}.`;
-    } else if (allFetchedRows.length > 0) {
-      summaryMessage = `✅ All events for ${displayDate} were already synced.`;
-    } else {
-      summaryMessage = `⚠️ No events found for ${displayDate}.`;
+      // 5. Append new rows
+      if (newRows.length > 0) {
+        sheet
+          .getRange(
+            sheet.getLastRow() + 1,
+            1,
+            newRows.length,
+            newRows[0].length
+          )
+          .setValues(newRows);
+      }
+
+      // 6. Show a specific, intelligent UI alert
+      let summaryMessage = "";
+      if (isSingleDay) {
+        const displayDate = Utilities.formatDate(startDate, tz, "dd MMM yyyy");
+        if (newRows.length > 0) {
+          summaryMessage = `✅ Synced ${newRows.length} new event(s) for ${displayDate}.`;
+        } else if (allFetchedRows.length > 0) {
+          summaryMessage = `✅ All events for ${displayDate} were already synced.`;
+        } else {
+          summaryMessage = `⚠️ No events found for ${displayDate}.`;
+        }
+      } else {
+        const displayStart = Utilities.formatDate(startDate, tz, "dd MMM");
+        const displayEnd = Utilities.formatDate(endDate, tz, "dd MMM yyyy");
+        summaryMessage = `✅ Range sync complete: ${displayStart} - ${displayEnd}.\n\n`;
+        summaryMessage +=
+          newRows.length > 0
+            ? `Total new events synced: ${newRows.length}`
+            : "All events in this period were already synced.";
+      }
+
+      ui.alert(summaryMessage);
+    } catch (e) {
+      // This will now catch ANY unexpected error during the sync process.
+      SpreadsheetApp.getUi().alert(
+        "❌ An unexpected error occurred during sync. Please try again.\n\nError: " +
+          e.message
+      );
+    } finally {
+      // ALWAYS release the lock when done.
+      lock.releaseLock();
     }
   } else {
-    const displayStart = Utilities.formatDate(startDate, tz, "dd MMM");
-    const displayEnd = Utilities.formatDate(endDate, tz, "dd MMM yyyy");
-    summaryMessage = `✅ Range sync complete: ${displayStart} - ${displayEnd}.\n\n`;
-    summaryMessage +=
-      newRows.length > 0
-        ? `Total new events synced: ${newRows.length}`
-        : "All events in this period were already synced.";
+    // If the lock was busy, immediately tell the user.
+    SpreadsheetApp.getUi().alert(
+      "⚠️ Another operation is already in progress. Please wait for it to finish and then try again."
+    );
   }
-
-  ui.alert(summaryMessage);
 }
 
 // ===================================
